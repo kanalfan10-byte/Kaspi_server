@@ -1,10 +1,10 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import requests
 
 app = FastAPI()
 
-# --- TELEGRAM НАСТРОЙКИ ---
+# --- ТЕЛЕГРАМ НАСТРОЙКИ ---
 TELEGRAM_BOT_TOKEN = "8135133326:AAH1sRHovfzjRcyeDGqeCALoMF_qvwS4C6k"
 TELEGRAM_CHAT_ID = "5070282357"
 
@@ -29,7 +29,7 @@ def parse_amount(data: dict) -> int:
 
 @app.post("/payment")
 async def payment_handler(request: Request):
-    """Получение POST-запроса от Kaspi."""
+    """Обработка платежа от Kaspi или теста."""
     data = await request.json()
     print("Получено:", data)
 
@@ -51,23 +51,34 @@ async def payment_handler(request: Request):
         f"Данные: {data}"
     )
 
-    # Сюда позже добавим запрос на ESP32
     print(f"Надо запустить {games} игр.")
 
     return {"ok": True, "amount": amount, "games": games}
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    """Главная страница при заходе на сайт."""
+    """Главная страница."""
     html = """
     <!DOCTYPE html>
     <html>
     <head>
         <title>Kaspi Server</title>
+        <script>
+            async function testPayment() {
+                const response = await fetch("/payment", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ amount: 300, note: "Тест от кнопки" })
+                });
+                const result = await response.json();
+                alert("Тест отправлен! Ответ: " + JSON.stringify(result));
+            }
+        </script>
     </head>
-    <body style="text-align:center; font-family:sans-serif; margin-top:100px;">
+    <body style="text-align:center; font-family:sans-serif; margin-top:80px;">
         <h1>✅ Kaspi-сервер работает</h1>
         <p>Готов к приёму оплат через Kaspi QR</p>
+        <button onclick="testPayment()" style="margin-top:30px; padding:10px 20px; font-size:18px;">🧪 Тест оплаты</button>
     </body>
     </html>
     """
