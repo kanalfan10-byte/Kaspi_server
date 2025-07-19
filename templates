@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Управление</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f4f4f4;
+      text-align: center;
+      padding-top: 50px;
+    }
+    .btn {
+      font-size: 20px;
+      padding: 15px 30px;
+      margin: 10px;
+      border: none;
+      border-radius: 10px;
+      background: #28a745;
+      color: white;
+      cursor: pointer;
+    }
+    .btn.red {
+      background: #dc3545;
+    }
+  </style>
+</head>
+<body>
+  <h1>Панель управления</h1>
+  <form method="post" action="/test">
+    <button class="btn">Тест оплата</button>
+  </form>
+  <form method="post" action="/logout">
+    <button class="btn red">Выйти</button>
+  </form>
+</body>
+</html>
