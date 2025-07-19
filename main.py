@@ -1,17 +1,40 @@
 from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
-import requests
+import requests, sqlite3, os
+from datetime import datetime
 
 app = FastAPI()
 
-# --- НАСТРОЙКИ ---
+# --- КОНФИГ ---
 TELEGRAM_BOT_TOKEN = "8135133326:AAH1sRHovfzjRcyeDGqeCALoMF_qvwS4C6k"
 TELEGRAM_CHAT_ID = "5070282357"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "ramazan2025"
 
-# --- Хранилище авторизованных IP ---
+DB_FILE = "payments.db"
 authorized_ips = set()
+
+
+# --- ИНИЦИАЛИЗАЦИЯ БД ---
+def init_db():
+    if not os.path.exists(DB_FILE):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_id TEXT,
+                amount INTEGER,
+                games INTEGER,
+                timestamp TEXT,
+                raw_json TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+init_db()
+
 
 # --- ОТПРАВКА В TELEGRAM ---
 def send_telegram_message(text: str):
@@ -22,124 +45,114 @@ def send_telegram_message(text: str):
     except Exception as e:
         print("Ошибка Telegram:", e)
 
+
+# --- СОХРАНЕНИЕ В БД ---
+def save_payment(payment_id, amount, games, raw_json):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO payments (payment_id, amount, games, timestamp, raw_json) VALUES (?, ?, ?, ?, ?)",
+                   (payment_id, amount, games, datetime.now().isoformat(), str(raw_json)))
+    conn.commit()
+    conn.close()
+
+
 # --- ПАРСИНГ СУММЫ ---
 def parse_amount(data: dict) -> int:
-    for key in ("amount", "sum", "value", "total"):
-        if key in data:
-            try:
-                return int(float(data[key]))
-            except Exception:
-                pass
-    return 0
+    try:
+        return int(float(data.get("data", {}).get("amount", 0)))
+    except:
+        return 0
 
-# --- СТРАНИЦА ВХОДА ---
+
+# --- ВЕБ-ИНТЕРФЕЙС: ВХОД ---
 @app.get("/", response_class=HTMLResponse)
 async def login_page():
     return """
-    <html>
-    <head>
-        <title>Kaspi Вход</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body { font-family: sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; padding: 20px; }
-            form { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 360px; }
-            input { margin: 10px 0; padding: 10px; width: 100%; border-radius: 6px; border: 1px solid #ccc; font-size: 16px; }
-            button { background: #28a745; color: white; padding: 12px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; }
-            h2 { text-align: center; color: #333; }
-        </style>
-    </head>
-    <body>
-        <form method="post" action="/login">
-            <h2>Вход</h2>
-            <input type="text" name="username" placeholder="Логин" required><br>
-            <input type="password" name="password" placeholder="Пароль" required><br>
-            <button type="submit">Войти</button>
-        </form>
-    </body>
-    </html>
+    <html><head><title>Kaspi Вход</title></head><body>
+    <form method="post" action="/login">
+        <input name="username" placeholder="Логин" required><br>
+        <input name="password" placeholder="Пароль" type="password" required><br>
+        <button type="submit">Войти</button>
+    </form></body></html>
     """
+
 
 # --- ЛОГИН ---
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    client_ip = request.client.host
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        authorized_ips.add(client_ip)
-        return RedirectResponse(url="/panel", status_code=302)
-    return HTMLResponse("<h3>❌ Неверный логин или пароль.</h3><a href='/'>Назад</a>", status_code=401)
+        authorized_ips.add(request.client.host)
+        return RedirectResponse("/panel", status_code=302)
+    return HTMLResponse("Неверные данные", status_code=401)
 
-# --- ПАНЕЛЬ УПРАВЛЕНИЯ ---
+
+# --- ПАНЕЛЬ ---
 @app.get("/panel", response_class=HTMLResponse)
-async def control_panel(request: Request):
-    client_ip = request.client.host
-    if client_ip not in authorized_ips:
-        return RedirectResponse(url="/", status_code=302)
+async def panel(request: Request):
+    if request.client.host not in authorized_ips:
+        return RedirectResponse("/", status_code=302)
 
     return """
-    <html>
-    <head>
-        <title>Панель Kaspi</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            body { font-family: sans-serif; background: #eef2f7; display: flex; justify-content: center; align-items: center; height: 100vh; padding: 20px; }
-            .box { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; width: 100%; max-width: 400px; }
-            h2 { color: #333; }
-            button { padding: 12px 24px; font-size: 16px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; width: 100%; }
-            button:hover { background: #0056b3; }
-            .exit { background: #dc3545; }
-            .exit:hover { background: #b52a37; }
-        </style>
-    </head>
-    <body>
-        <div class="box">
-            <h2>Kaspi Панель</h2>
-            <form method="post" action="/test">
-                <button type="submit">💸 Отправить тест оплаты</button>
-            </form><br>
-            <form method="post" action="/logout">
-                <button type="submit" class="exit">🚪 Выйти</button>
-            </form>
-        </div>
-    </body>
-    </html>
+    <html><body>
+    <h2>Панель управления</h2>
+    <form method="post" action="/test">
+        <button type="submit">Тест оплата</button>
+    </form>
+    <form method="post" action="/logout">
+        <button type="submit">Выйти</button>
+    </form>
+    </body></html>
     """
+
 
 # --- ВЫХОД ---
 @app.post("/logout")
 async def logout(request: Request):
-    client_ip = request.client.host
-    authorized_ips.discard(client_ip)
-    return RedirectResponse(url="/", status_code=302)
+    authorized_ips.discard(request.client.host)
+    return RedirectResponse("/", status_code=302)
 
-# --- ТЕСТ ОПЛАТЫ ---
+
+# --- ТЕСТОВАЯ ОПЛАТА ---
 @app.post("/test")
 async def test_payment():
-    dummy_data = {"amount": 300, "from": "ТЕСТЕР"}
-    amount = parse_amount(dummy_data)
-    games = amount // 100
-    send_telegram_message(f"💸 ТЕСТОВАЯ ОПЛАТА!\nСумма: {amount}₸\nИгры: {games}\nДанные: {dummy_data}")
-    return RedirectResponse(url="/panel", status_code=302)
+    test_data = {
+        "event": "payment.success",
+        "data": {
+            "paymentId": "TEST123",
+            "amount": 500,
+            "qrId": "kaspi-test",
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+    return await payment_handler(Request(scope={"type": "http"}, receive=None), test_data)
 
-# --- НАСТОЯЩАЯ ОПЛАТА ---
+
+# --- ПРИЁМ НАСТОЯЩЕЙ ОПЛАТЫ ---
 @app.post("/payment")
-async def payment_handler(request: Request):
-    data = await request.json()
+async def payment_handler(request: Request, data: dict = None):
+    if not data:
+        data = await request.json()
+
     print("Получено:", data)
 
     amount = parse_amount(data)
     if amount <= 0:
-        send_telegram_message(f"⚠️ Платёж без суммы: {data}")
+        send_telegram_message(f"⚠️ Нет суммы!\n{data}")
         raise HTTPException(status_code=400, detail="Нет суммы.")
 
     if amount % 100 != 0:
-        send_telegram_message(f"⚠️ Неправильная сумма {amount}₸ (не кратно 100). Данные: {data}")
+        send_telegram_message(f"⚠️ Неправильная сумма: {amount}₸ (не кратна 100)")
         raise HTTPException(status_code=400, detail="Сумма должна быть кратна 100.")
 
     games = amount // 100
+    payment_id = data.get("data", {}).get("paymentId", "неизвестно")
+    save_payment(payment_id, amount, games, data)
+
     send_telegram_message(
         f"💸 Оплата Kaspi!\n"
         f"Сумма: {amount}₸\n"
         f"Игры: {games}\n"
-        f"Данные: {data}"
+        f"ID: {payment_id}"
     )
+
     return {"ok": True, "amount": amount, "games": games}
